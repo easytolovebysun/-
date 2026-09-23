@@ -1,0 +1,911 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>案件圖片標註工具</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<style>
+  :root{
+    --ink:#20262b;
+    --ink-soft:#5b656d;
+    --paper:#faf9f6;
+    --paper-card:#ffffff;
+    --line:#dcd6cc;
+    --brick:#b8452f;
+    --brick-dark:#8f3423;
+    --steel:#3a5a70;
+    --tag-bg:#eee9dd;
+  }
+  *{box-sizing:border-box;}
+  html,body{
+    margin:0;padding:0;
+    height:100vh;
+    height:100dvh;
+    overflow:hidden;
+  }
+  body{
+    background:var(--paper);
+    color:var(--ink);
+    font-family:"Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
+    line-height:1.5;
+    display:flex;
+    flex-direction:column;
+  }
+
+  /* ---------- header ---------- */
+  header.topbar{
+    display:flex;
+    align-items:center;
+    gap:16px;
+    flex-wrap:wrap;
+    padding:10px 16px;
+    background:var(--paper-card);
+    border-bottom:1px solid var(--line);
+    flex-shrink:0;
+  }
+  .brand{display:flex; align-items:baseline; gap:10px; white-space:nowrap;}
+  .brand .eyebrow{
+    font-size:11.5px; font-weight:700; color:var(--brick); margin:0;
+  }
+  .brand h1{ font-size:17px; font-weight:900; margin:0; letter-spacing:-0.01em; }
+
+  .stage-settings-inline{
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap;
+    font-size:12px; color:var(--ink-soft); flex:1;
+  }
+  .stage-settings-inline input{
+    width:84px; padding:5px 7px; border:1px solid var(--line); border-radius:6px;
+    font-family:inherit; font-size:13px; font-weight:700; text-align:center;
+  }
+
+  .dl-all{
+    background:var(--brick); color:#fff; border:none; border-radius:8px;
+    padding:9px 16px; font-size:13.5px; font-weight:700; font-family:inherit;
+    cursor:pointer; white-space:nowrap;
+  }
+  .dl-all:disabled{ background:#c9c2b6; cursor:not-allowed; }
+
+  /* ---------- workspace ---------- */
+  .workspace{
+    flex:1;
+    display:flex;
+    min-height:0;
+  }
+
+  /* thumbnail rail */
+  .thumb-rail{
+    width:260px;
+    flex-shrink:0;
+    border-right:1px solid var(--line);
+    background:var(--paper-card);
+    overflow-y:auto;
+  }
+  .thumb-rail-inner{
+    display:grid;
+    grid-template-columns:1fr;
+    gap:10px;
+    padding:10px;
+  }
+  .add-tile{
+    height:140px;
+    border:2px dashed var(--line);
+    border-radius:8px;
+    display:flex; align-items:center; justify-content:center;
+    flex-direction:column;
+    font-size:13px; font-weight:700; color:var(--ink-soft);
+    cursor:pointer; text-align:center; gap:4px;
+  }
+  .add-tile:hover{ border-color:var(--brick); color:var(--brick); }
+  .add-tile.drag{ border-color:var(--brick); background:#fbf1ee; color:var(--brick); }
+  .add-tile .plus{ font-size:28px; line-height:1; }
+
+  .thumb{
+    position:relative;
+    height:140px;
+    border-radius:8px;
+    overflow:hidden;
+    border:2px solid transparent;
+    cursor:pointer;
+    background:#eee;
+  }
+  .thumb.active{ border-color:var(--brick); }
+  .thumb img{ width:100%; height:100%; object-fit:cover; display:block; }
+  .thumb .thumb-badge{
+    position:absolute; top:3px; left:4px;
+    font-size:12px; font-weight:900;
+    text-shadow:0 0 3px #fff, 0 0 3px #fff, 0 0 5px #fff;
+    pointer-events:none;
+  }
+  .thumb .thumb-remove{
+    position:absolute; top:2px; right:2px;
+    width:18px; height:18px; border-radius:50%;
+    background:rgba(0,0,0,0.55); color:#fff; border:none;
+    font-size:12px; line-height:18px; text-align:center; padding:0;
+    cursor:pointer;
+  }
+
+  /* editor */
+  .editor{
+    flex:1;
+    min-width:0;
+    min-height:0;
+    display:flex;
+    flex-direction:column;
+    padding:14px 18px 12px;
+    overflow-y:auto;
+  }
+  .editor-empty{
+    margin:auto;
+    color:var(--ink-soft);
+    font-size:14px;
+    text-align:center;
+  }
+  .editor-content{
+    display:flex;
+    flex-direction:column;
+    height:100%;
+    min-height:0;
+    gap:8px;
+  }
+  .canvas-wrap{
+    flex:1;
+    min-height:200px;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    background:repeating-conic-gradient(#eee 0% 25%, #f7f7f5 0% 50%) 50% / 16px 16px;
+    border:1px solid var(--line);
+    border-radius:10px;
+    touch-action:none;
+    cursor:crosshair;
+    overflow:hidden;
+  }
+  #editorCanvas{
+    max-width:100%;
+    max-height:100%;
+    width:auto;
+    height:auto;
+    display:block;
+  }
+  .filename{
+    font-size:11.5px;
+    color:var(--ink-soft);
+    word-break:break-all;
+  }
+
+  .controls-bar{
+    display:flex;
+    align-items:center;
+    gap:20px;
+    flex-wrap:wrap;
+    flex-shrink:0;
+    background:var(--paper-card);
+    border:1px solid var(--line);
+    border-radius:10px;
+    padding:14px 16px;
+  }
+  .ctrl-group{ display:flex; align-items:center; gap:9px; }
+  .ctrl-group .g-label{ font-size:13.5px; color:var(--ink-soft); white-space:nowrap; }
+
+  .stage-btns{ display:flex; gap:7px; }
+  .stage-btns button{
+    padding:10px 18px; border-radius:8px; border:1px solid var(--line);
+    background:var(--tag-bg); color:var(--ink); font-family:inherit;
+    font-size:16px; font-weight:700; cursor:pointer;
+  }
+  .stage-btns button.active{ background:var(--brick); border-color:var(--brick-dark); color:#fff; }
+
+  .custom-text{
+    width:140px; padding:10px 12px; border:1px solid var(--line); border-radius:8px;
+    font-family:inherit; font-size:15px;
+  }
+  input[type="range"]{ width:140px; height:22px; }
+  input[type="color"]{
+    width:44px; height:36px; border:1px solid var(--line); border-radius:8px; padding:0; background:none; cursor:pointer;
+  }
+  .outline-btns{ display:flex; gap:8px; }
+  .outline-btns button{ width:32px; height:32px; border-radius:50%; cursor:pointer; }
+  .outline-btns button[data-o="white"]{ background:#fff; border:1px solid #ccc; }
+  .outline-btns button[data-o="black"]{ background:#111; border:1px solid #111; }
+  .outline-btns button[data-o="none"]{ background:repeating-linear-gradient(45deg,#fff,#fff 3px,#e11 3px,#e11 4px); border:1px solid #ccc; }
+  .outline-btns button.active{ outline:2px solid var(--steel); outline-offset:2px; }
+
+  .date-toggle{ display:flex; align-items:center; gap:7px; cursor:pointer; }
+  .date-toggle input[type="checkbox"]{ width:19px; height:19px; cursor:pointer; accent-color:var(--brick); }
+  .date-toggle .g-label{ cursor:pointer; }
+
+  .spacer{ flex:1; }
+  .ghost-btn{
+    background:none; border:1px solid var(--line); color:var(--brick);
+    font-size:15px; font-weight:700; cursor:pointer; padding:11px 18px; border-radius:8px;
+    font-family:inherit; white-space:nowrap;
+  }
+  .dl-btn{
+    background:var(--steel); color:#fff; border:none; border-radius:8px;
+    padding:12px 22px; font-size:15px; font-weight:700; cursor:pointer; font-family:inherit;
+    white-space:nowrap;
+  }
+
+  @media (max-width:760px){
+    html, body{ height:auto; min-height:100vh; min-height:100dvh; overflow:visible; }
+
+    header.topbar{ padding:8px 10px; gap:8px; }
+    .brand h1{ font-size:15px; }
+    .brand .eyebrow{ font-size:10.5px; }
+    .stage-settings-inline{ width:100%; order:3; font-size:11px; }
+    .stage-settings-inline input{ width:64px; font-size:12.5px; }
+    .dl-all{ padding:8px 14px; font-size:13px; }
+
+    .workspace{ flex-direction:column; height:auto; min-height:calc(100vh - 64px); min-height:calc(100dvh - 64px); }
+
+    .thumb-rail{
+      width:100%;
+      height:112px;
+      border-right:none;
+      border-bottom:1px solid var(--line);
+      overflow-x:auto;
+      overflow-y:hidden;
+    }
+    .thumb-rail-inner{
+      display:flex;
+      flex-direction:row;
+      grid-template-columns:none;
+      height:100%;
+      padding:8px;
+    }
+    .add-tile{
+      flex:0 0 92px;
+      height:100%;
+      font-size:11px;
+      gap:2px;
+    }
+    .add-tile .plus{ font-size:20px; }
+    .thumb{
+      flex:0 0 92px;
+      height:100%;
+    }
+
+    .editor{ padding:10px 10px 14px; overflow-y:visible; }
+    .editor-content{ height:auto; }
+    .canvas-wrap{ min-height:260px; }
+
+    .controls-bar{ gap:12px; padding:10px 12px; justify-content:flex-start; }
+    .ctrl-group{ gap:6px; }
+    .stage-btns button{ padding:8px 14px; font-size:14px; }
+    .custom-text{ width:110px; padding:8px 10px; font-size:14px; }
+    input[type="range"]{ width:100px; }
+    .ghost-btn, .dl-btn{ padding:9px 14px; font-size:13.5px; }
+    .spacer{ flex-basis:100%; height:0; }
+  }
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <p class="eyebrow">受理案件文書工具</p>
+    <h1>案件圖片標註工具</h1>
+  </div>
+  <div class="stage-settings-inline" id="stageSettingsInline">
+    <span>階段名稱：</span>
+  </div>
+  <button class="dl-all" id="downloadAllBtn" disabled>下載全部（ZIP）</button>
+</header>
+
+<div class="workspace">
+  <aside class="thumb-rail">
+    <div class="thumb-rail-inner" id="thumbRail">
+      <label class="add-tile" id="addTile" for="fileInput">
+        <span class="plus">＋</span>
+        <span>新增圖片</span>
+      </label>
+      <input type="file" id="fileInput" accept="image/*" multiple hidden>
+    </div>
+  </aside>
+
+  <section class="editor" id="editor">
+    <div class="editor-empty" id="editorEmpty">尚未上傳圖片，請從左側「＋ 新增圖片」上傳，可一次選取多張。</div>
+    <div class="editor-content" id="editorContent" hidden>
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="editorCanvas"></canvas>
+      </div>
+      <div class="filename" id="editorFilename"></div>
+      <div class="controls-bar">
+        <div class="ctrl-group">
+          <span class="g-label">階段</span>
+          <div class="stage-btns" id="stageBtns"></div>
+        </div>
+        <div class="ctrl-group">
+          <span class="g-label">自訂</span>
+          <input type="text" class="custom-text" id="customText" placeholder="自訂文字">
+        </div>
+        <div class="ctrl-group">
+          <span class="g-label">字級</span>
+          <input type="range" id="fontSizeInput">
+        </div>
+        <div class="ctrl-group">
+          <span class="g-label">顏色</span>
+          <input type="color" id="colorInput">
+        </div>
+        <div class="ctrl-group">
+          <span class="g-label">描邊</span>
+          <div class="outline-btns" id="outlineBtns">
+            <button type="button" data-o="white" title="白框"></button>
+            <button type="button" data-o="black" title="黑框"></button>
+            <button type="button" data-o="none" title="無框"></button>
+          </div>
+        </div>
+        <div class="ctrl-group">
+          <label class="date-toggle" for="dateToggle">
+            <input type="checkbox" id="dateToggle">
+            <span class="g-label">加註今日日期</span>
+          </label>
+          <span class="g-label">字級</span>
+          <input type="range" id="dateFontSizeInput">
+        </div>
+        <div class="spacer"></div>
+        <button class="ghost-btn" id="removeBtn">移除這張</button>
+        <button class="dl-btn" id="copyBtn">複製圖片</button>
+        <button class="dl-btn" id="downloadOneBtn">下載此圖</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const STAGES = ["處理前","處理中","處理後"];
+const items = [];
+let uid = 0;
+let activeId = null;
+
+const thumbRail = document.getElementById('thumbRail');
+const addTile = document.getElementById('addTile');
+const fileInput = document.getElementById('fileInput');
+const downloadAllBtn = document.getElementById('downloadAllBtn');
+const editorEmpty = document.getElementById('editorEmpty');
+const editorContent = document.getElementById('editorContent');
+const canvasWrap = document.getElementById('canvasWrap');
+const editorCanvas = document.getElementById('editorCanvas');
+const editorCtx = editorCanvas.getContext('2d');
+const editorFilename = document.getElementById('editorFilename');
+const stageBtnsWrap = document.getElementById('stageBtns');
+const customTextInput = document.getElementById('customText');
+const fontSizeInput = document.getElementById('fontSizeInput');
+const colorInput = document.getElementById('colorInput');
+const outlineBtnsWrap = document.getElementById('outlineBtns');
+const dateToggle = document.getElementById('dateToggle');
+const dateFontSizeInput = document.getElementById('dateFontSizeInput');
+const removeBtn = document.getElementById('removeBtn');
+const copyBtn = document.getElementById('copyBtn');
+const downloadOneBtn = document.getElementById('downloadOneBtn');
+const stageSettingsInline = document.getElementById('stageSettingsInline');
+
+function getActive(){ return items.find(i => i.id === activeId) || null; }
+
+/* ---------- global stage name settings ---------- */
+STAGES.forEach((name, idx)=>{
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = name;
+  input.maxLength = 6;
+  input.addEventListener('input', ()=>{
+    const val = input.value.trim() || STAGES[idx];
+    STAGES[idx] = val;
+    document.querySelectorAll(`.stage-btns button[data-idx="${idx}"]`).forEach(b=> b.textContent = val);
+    items.forEach(it=>{
+      if(!it.isCustom && it.stageIdx === idx){
+        updateThumbBadge(it);
+        if(it.id === activeId) drawActive();
+      }
+    });
+  });
+  stageSettingsInline.appendChild(input);
+});
+
+/* ---------- stage buttons (built once) ---------- */
+STAGES.forEach((s, idx)=>{
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.textContent = s;
+  b.dataset.idx = idx;
+  b.addEventListener('click', ()=>{
+    const item = getActive();
+    if(!item) return;
+    item.isCustom = false;
+    item.stageIdx = idx;
+    customTextInput.value = '';
+    syncStageButtons(item);
+    drawActive();
+    updateThumbBadge(item);
+  });
+  stageBtnsWrap.appendChild(b);
+});
+
+function syncStageButtons(item){
+  [...stageBtnsWrap.children].forEach(c=>{
+    c.classList.toggle('active', !item.isCustom && Number(c.dataset.idx) === item.stageIdx);
+  });
+}
+
+[...outlineBtnsWrap.children].forEach(b=>{
+  b.addEventListener('click', ()=>{
+    const item = getActive();
+    if(!item) return;
+    item.outline = b.dataset.o;
+    [...outlineBtnsWrap.children].forEach(c=>c.classList.remove('active'));
+    b.classList.add('active');
+    drawActive();
+  });
+});
+
+customTextInput.addEventListener('input', ()=>{
+  const item = getActive();
+  if(!item) return;
+  item.customText = customTextInput.value;
+  item.isCustom = customTextInput.value.trim().length > 0;
+  syncStageButtons(item);
+  drawActive();
+  updateThumbBadge(item);
+});
+
+fontSizeInput.addEventListener('input', ()=>{
+  const item = getActive();
+  if(!item) return;
+  item.fontSize = Number(fontSizeInput.value);
+  drawActive();
+});
+
+colorInput.addEventListener('input', ()=>{
+  const item = getActive();
+  if(!item) return;
+  item.color = colorInput.value;
+  drawActive();
+  updateThumbBadge(item);
+});
+
+dateToggle.addEventListener('change', ()=>{
+  const item = getActive();
+  if(!item) return;
+  item.showDate = dateToggle.checked;
+  dateFontSizeInput.disabled = !item.showDate;
+  drawActive();
+  updateThumbBadge(item);
+});
+
+dateFontSizeInput.addEventListener('input', ()=>{
+  const item = getActive();
+  if(!item) return;
+  item.dateFontSize = Number(dateFontSizeInput.value);
+  drawActive();
+});
+
+removeBtn.addEventListener('click', ()=>{
+  const item = getActive();
+  if(!item) return;
+  const idx = items.findIndex(i=>i.id===item.id);
+  items.splice(idx,1);
+  item.thumbEl.remove();
+  if(items.length){
+    setActive(items[Math.max(0, idx-1)].id);
+  } else {
+    activeId = null;
+    showEmptyState();
+  }
+  updateFooter();
+});
+
+downloadOneBtn.addEventListener('click', ()=>{
+  const item = getActive();
+  if(item) downloadItem(item);
+});
+
+copyBtn.addEventListener('click', async ()=>{
+  const item = getActive();
+  if(!item) return;
+  const oldLabel = copyBtn.textContent;
+  try{
+    if(!navigator.clipboard || !window.ClipboardItem){
+      throw new Error('clipboard_unsupported');
+    }
+    const blob = await new Promise(res=> editorCanvas.toBlob(res, 'image/png'));
+    await navigator.clipboard.write([ new ClipboardItem({ 'image/png': blob }) ]);
+    copyBtn.textContent = '已複製！';
+  }catch(err){
+    copyBtn.textContent = '複製失敗';
+    console.warn('Copy to clipboard failed:', err);
+  }
+  setTimeout(()=> copyBtn.textContent = oldLabel, 1500);
+});
+
+/* ---------- upload handling ---------- */
+addTile.addEventListener('click', e=>{ /* label triggers input natively */ });
+fileInput.addEventListener('change', e=> handleFiles(e.target.files));
+
+['dragenter','dragover'].forEach(evt=>{
+  document.querySelector('.thumb-rail').addEventListener(evt, e=>{ e.preventDefault(); addTile.classList.add('drag'); });
+});
+['dragleave','drop'].forEach(evt=>{
+  document.querySelector('.thumb-rail').addEventListener(evt, e=>{ e.preventDefault(); addTile.classList.remove('drag'); });
+});
+document.querySelector('.thumb-rail').addEventListener('drop', e=>{
+  if(e.dataTransfer.files && e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+});
+
+function handleFiles(fileList){
+  Array.from(fileList).forEach(file=>{
+    if(!file.type.startsWith('image/')) return;
+    const reader = new FileReader();
+    reader.onload = ev=>{
+      const img = new Image();
+      img.onload = ()=> addItem(img, file.name);
+      img.src = ev.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+  fileInput.value = '';
+}
+
+function addItem(img, name){
+  const id = 'im' + (uid++);
+  const item = {
+    id, img, name,
+    stageIdx: 0,
+    customText: '',
+    isCustom: false,
+    fontSize: Math.round(Math.min(img.width, img.height) * 0.12),
+    color: '#ff3b30',
+    outline: 'none',
+    showDate: false,
+    dateFontSize: Math.round(Math.min(img.width, img.height) * 0.06),
+    x: 0.08,
+    y: 0.14,
+  };
+  items.push(item);
+  buildThumb(item);
+  setActive(id);
+  updateFooter();
+}
+
+function buildThumb(item){
+  const thumb = document.createElement('div');
+  thumb.className = 'thumb';
+  thumb.dataset.id = item.id;
+
+  const img = document.createElement('img');
+  img.src = item.img.src;
+  thumb.appendChild(img);
+
+  const badge = document.createElement('span');
+  badge.className = 'thumb-badge';
+  thumb.appendChild(badge);
+
+  const removeX = document.createElement('button');
+  removeX.className = 'thumb-remove';
+  removeX.type = 'button';
+  removeX.textContent = '×';
+  removeX.addEventListener('click', e=>{
+    e.stopPropagation();
+    const idx = items.findIndex(i=>i.id===item.id);
+    items.splice(idx,1);
+    thumb.remove();
+    if(activeId === item.id){
+      if(items.length){
+        setActive(items[Math.max(0, idx-1)].id);
+      } else {
+        activeId = null;
+        showEmptyState();
+      }
+    }
+    updateFooter();
+  });
+  thumb.appendChild(removeX);
+
+  thumb.addEventListener('click', ()=> setActive(item.id));
+
+  item.thumbEl = thumb;
+  item.badgeEl = badge;
+  thumbRail.appendChild(thumb);
+  updateThumbBadge(item);
+}
+
+function updateThumbBadge(item){
+  item.badgeEl.textContent = currentText(item);
+  item.badgeEl.style.color = item.color;
+}
+
+function setActive(id){
+  activeId = id;
+  const item = getActive();
+  if(!item) { showEmptyState(); return; }
+
+  [...thumbRail.querySelectorAll('.thumb')].forEach(t=> t.classList.toggle('active', t.dataset.id === id));
+
+  editorEmpty.hidden = true;
+  editorContent.hidden = false;
+
+  editorFilename.textContent = item.name;
+  syncStageButtons(item);
+  customTextInput.value = item.customText;
+  const maxDim = Math.max(item.img.width, item.img.height);
+  fontSizeInput.min = Math.round(maxDim * 0.02);
+  fontSizeInput.max = Math.round(maxDim * 0.4);
+  fontSizeInput.value = item.fontSize;
+  colorInput.value = item.color;
+  dateToggle.checked = item.showDate;
+  dateFontSizeInput.min = Math.round(maxDim * 0.01);
+  dateFontSizeInput.max = Math.round(maxDim * 0.3);
+  dateFontSizeInput.value = item.dateFontSize;
+  dateFontSizeInput.disabled = !item.showDate;
+  [...outlineBtnsWrap.children].forEach(b=> b.classList.toggle('active', b.dataset.o === item.outline));
+
+  editorCanvas.width = item.img.width;
+  editorCanvas.height = item.img.height;
+  drawActive();
+}
+
+function showEmptyState(){
+  editorEmpty.hidden = false;
+  editorContent.hidden = true;
+}
+
+function todayStr(){
+  const d = new Date();
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth()+1).padStart(2,'0');
+  const dd = String(d.getDate()).padStart(2,'0');
+  return `${yyyy}/${mm}/${dd}`;
+}
+
+function baseText(item){
+  return item.isCustom && item.customText.trim() ? item.customText.trim() : STAGES[item.stageIdx];
+}
+
+// Combined display text (label + date), used for thumbnails and filenames.
+function currentText(item){
+  const base = baseText(item);
+  return item.showDate ? `${base} ${todayStr()}` : base;
+}
+
+// Filenames can't contain "/", which today's date format uses.
+function safeFileText(item){
+  return currentText(item).replace(/[\\/:*?"<>|]/g, '-');
+}
+
+// Measures the label (and date, if shown) as two stacked lines using the
+// given canvas context. Returns geometry needed both to draw and to hit-test.
+function measureLayout(item, ctx){
+  const label = baseText(item);
+  ctx.font = `900 ${item.fontSize}px "Noto Sans TC", sans-serif`;
+  const labelW = ctx.measureText(label).width;
+  const labelLineH = item.fontSize * 1.15;
+
+  let dateStr = null, dateW = 0, dateLineH = 0;
+  if(item.showDate){
+    dateStr = todayStr();
+    ctx.font = `900 ${item.dateFontSize}px "Noto Sans TC", sans-serif`;
+    dateW = ctx.measureText(dateStr).width;
+    dateLineH = item.dateFontSize * 1.15;
+  }
+  const gap = dateStr ? item.fontSize * 0.15 : 0;
+  return {
+    label, labelW, labelLineH,
+    dateStr, dateW, dateLineH,
+    gap,
+    totalW: Math.max(labelW, dateW),
+    totalH: labelLineH + gap + dateLineH
+  };
+}
+
+// Draws the label (and date line, if enabled) onto any canvas context at
+// the given top-left anchor point.
+function drawLabelOn(ctx, item, px, py){
+  const layout = measureLayout(item, ctx);
+  ctx.textBaseline = 'top';
+
+  ctx.font = `900 ${item.fontSize}px "Noto Sans TC", sans-serif`;
+  if(item.outline !== 'none'){
+    ctx.lineJoin = 'round';
+    ctx.miterLimit = 2;
+    ctx.lineWidth = Math.max(2, item.fontSize * 0.16);
+    ctx.strokeStyle = item.outline === 'white' ? '#ffffff' : '#000000';
+    ctx.strokeText(layout.label, px, py);
+  }
+  ctx.fillStyle = item.color;
+  ctx.fillText(layout.label, px, py);
+
+  if(layout.dateStr){
+    const dy = py + layout.labelLineH + layout.gap;
+    ctx.font = `900 ${item.dateFontSize}px "Noto Sans TC", sans-serif`;
+    if(item.outline !== 'none'){
+      ctx.lineWidth = Math.max(2, item.dateFontSize * 0.16);
+      ctx.strokeStyle = item.outline === 'white' ? '#ffffff' : '#000000';
+      ctx.strokeText(layout.dateStr, px, dy);
+    }
+    ctx.fillStyle = item.color;
+    ctx.fillText(layout.dateStr, px, dy);
+  }
+  return layout;
+}
+
+function drawActive(){
+  const item = getActive();
+  if(!item) return;
+  editorCtx.clearRect(0,0,editorCanvas.width, editorCanvas.height);
+  editorCtx.drawImage(item.img, 0, 0, editorCanvas.width, editorCanvas.height);
+  const px = item.x * editorCanvas.width;
+  const py = item.y * editorCanvas.height;
+  drawLabelOn(editorCtx, item, px, py);
+}
+
+/* ---------- drag to position text on the active canvas ---------- */
+let dragging = false;
+let dragOffsetX = 0, dragOffsetY = 0;
+
+function canvasPxFromEvent(e){
+  const rect = editorCanvas.getBoundingClientRect();
+  const scaleX = editorCanvas.width / rect.width;
+  const scaleY = editorCanvas.height / rect.height;
+  return {
+    x: (e.clientX - rect.left) * scaleX,
+    y: (e.clientY - rect.top) * scaleY
+  };
+}
+
+function textBBox(item){
+  const x = item.x * editorCanvas.width;
+  const y = item.y * editorCanvas.height;
+  const layout = measureLayout(item, editorCtx);
+  const pad = item.fontSize * 0.15; // easier to grab near edges
+  return { x: x - pad, y: y - pad, w: layout.totalW + pad * 2, h: layout.totalH + pad * 2 };
+}
+
+canvasWrap.addEventListener('pointerdown', e=>{
+  const item = getActive();
+  if(!item) return;
+  canvasWrap.setPointerCapture(e.pointerId);
+  const p = canvasPxFromEvent(e);
+  const box = textBBox(item);
+  const inside = p.x >= box.x && p.x <= box.x + box.w && p.y >= box.y && p.y <= box.y + box.h;
+  if(inside){
+    dragOffsetX = p.x - item.x * editorCanvas.width;
+    dragOffsetY = p.y - item.y * editorCanvas.height;
+  } else {
+    dragOffsetX = 0;
+    dragOffsetY = 0;
+    item.x = Math.min(Math.max(p.x / editorCanvas.width, 0), 1);
+    item.y = Math.min(Math.max(p.y / editorCanvas.height, 0), 1);
+    drawActive();
+  }
+  dragging = true;
+});
+canvasWrap.addEventListener('pointermove', e=>{
+  if(!dragging) return;
+  const item = getActive();
+  if(!item) return;
+  const p = canvasPxFromEvent(e);
+  item.x = Math.min(Math.max((p.x - dragOffsetX) / editorCanvas.width, 0), 1);
+  item.y = Math.min(Math.max((p.y - dragOffsetY) / editorCanvas.height, 0), 1);
+  drawActive();
+});
+canvasWrap.addEventListener('pointerup', ()=> dragging = false);
+canvasWrap.addEventListener('pointercancel', ()=> dragging = false);
+
+/* ---------- footer / counts ---------- */
+function updateFooter(){
+  downloadAllBtn.disabled = items.length === 0;
+}
+
+/* ---------- saving files (claude.ai downloads capability, with fallback) ---------- */
+let downloadsCapPromise = null;
+function getDownloadsCap(){
+  if(!downloadsCapPromise){
+    downloadsCapPromise = (async ()=>{
+      try{
+        if(window.claude && typeof window.claude.use === 'function'){
+          return await window.claude.use('downloads');
+        }
+      }catch(e){ /* fall through */ }
+      return null;
+    })();
+  }
+  return downloadsCapPromise;
+}
+
+function fallbackSave(filename, blob){
+  // Try opening the file directly first — plain navigation to a blob URL
+  // often lets the browser handle it as a normal download even when a
+  // script-triggered anchor click is blocked.
+  try{
+    const url = URL.createObjectURL(blob);
+    const win = window.open(url, '_blank');
+    if(win){
+      setTimeout(()=> URL.revokeObjectURL(url), 30000);
+      return;
+    }
+  }catch(e){ /* fall through */ }
+
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(()=> URL.revokeObjectURL(a.href), 5000);
+}
+
+async function saveFile(filename, blob){
+  const cap = await getDownloadsCap();
+  if(cap){
+    try{
+      await cap.save({ filename, data: blob });
+      return;
+    }catch(err){
+      if(err && err.code === 'declined') return;
+      // any other error: fall through to the local fallback below
+    }
+  }
+  fallbackSave(filename, blob);
+}
+
+function fileBaseAndExt(name){
+  const dot = name.lastIndexOf('.');
+  if(dot === -1) return [name, 'png'];
+  return [name.slice(0,dot), name.slice(dot+1) || 'png'];
+}
+
+function renderToBlob(item){
+  return new Promise(resolve=>{
+    const c = document.createElement('canvas');
+    c.width = item.img.width; c.height = item.img.height;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(item.img, 0, 0, c.width, c.height);
+    const px = item.x * c.width, py = item.y * c.height;
+    drawLabelOn(ctx, item, px, py);
+    c.toBlob(resolve, 'image/png');
+  });
+}
+
+async function downloadItem(item){
+  const blob = item.id === activeId
+    ? await new Promise(res=> editorCanvas.toBlob(res, 'image/png'))
+    : await renderToBlob(item);
+  const [base] = fileBaseAndExt(item.name);
+  saveFile(`${base}_${safeFileText(item)}.png`, blob);
+}
+
+downloadAllBtn.addEventListener('click', async ()=>{
+  if(items.length === 0) return;
+  downloadAllBtn.disabled = true;
+  const oldLabel = downloadAllBtn.textContent;
+  downloadAllBtn.textContent = '打包中…';
+  try{
+    const zip = new JSZip();
+    const usedNames = {};
+    for(const item of items){
+      const blob = item.id === activeId
+        ? await new Promise(res=> editorCanvas.toBlob(res, 'image/png'))
+        : await renderToBlob(item);
+      const [base] = fileBaseAndExt(item.name);
+      let name = `${base}_${safeFileText(item)}.png`;
+      if(usedNames[name] !== undefined){
+        usedNames[name]++;
+        const dot = name.lastIndexOf('.');
+        name = `${name.slice(0,dot)}_${usedNames[name]}${name.slice(dot)}`;
+      } else {
+        usedNames[name] = 0;
+      }
+      zip.file(name, blob);
+    }
+    const content = await zip.generateAsync({type:'blob'});
+    await saveFile('案件照片_已標註.zip', content);
+  } finally {
+    downloadAllBtn.disabled = items.length === 0;
+    downloadAllBtn.textContent = oldLabel;
+  }
+});
+</script>
+</body>
+</html>
